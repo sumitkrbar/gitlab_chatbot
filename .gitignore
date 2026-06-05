@@ -1,0 +1,20 @@
+# Secrets
+.env
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Scraper cache (raw HTML/text dumps); the Chroma index IS committed on purpose
+data/raw/
+
+# Run logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
