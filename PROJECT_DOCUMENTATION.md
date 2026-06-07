@@ -54,7 +54,91 @@ fail intermittently for real users. I moved embeddings to a local ONNX model
 Retrieval is now free and unlimited, and the Gemini quota is only spent on
 generating the answer, which is the part that actually needs it.
 
-## 4. What makes it trustworthy (the bonus criteria)
+## 4. The pipeline
+
+There are two entry points and a shared `src/` package. `ingest.py` builds the
+index offline; `app.py` serves queries online. Both read their settings from
+`src/config.py`, which is the single place models, paths, retrieval knobs, and the
+crawl allowlist live.
+
+### Ingestion (offline): `ingest.py`
+
+`ingest.py` is a thin CLI wrapper that runs three stages and prints an honest
+summary of each (pages kept, pages skipped as too short, errors).
+
+1. **Crawl — `src/scraper.py:crawl()`.** Each URL in `SEED_URLS` gets an equal
+   slice of the page budget and a BFS confined to its own subtree, so a link-heavy
+   area (e.g. `/handbook/company`) can't starve the rest. Within a seed, each BFS
+   level is fetched concurrently with a thread pool (`_fetch`), because handbook
+   pages are slow to load. A link is only followed or kept if its URL passes the
+   `ALLOWED_PREFIXES` check (`_is_allowed`), and URLs are normalised (`_normalise`)
+   so the same page isn't crawled twice via fragments or trailing slashes.
+   `_extract()` pulls clean main content as Markdown with `trafilatura` (so headings
+   survive as `#`), and falls back to a stripped-down BeautifulSoup parse if that
+   returns nothing. Pages under 200 characters are dropped as boilerplate. The
+   output is a list of `Page(url, title, text)`.
+
+2. **Chunk — `src/chunker.py:chunk_pages()`.** Each page is split on Markdown
+   headings (`_split_into_sections`), then consecutive sections are packed into
+   ~`CHUNK_TOKENS` (650) windows with `CHUNK_OVERLAP_TOKENS` (100) of overlap
+   (`_pack`); a single section larger than the target is sliced into overlapping
+   token windows. Token counts use `tiktoken`. Each `Chunk` carries a heading
+   "breadcrumb" prepended to its text (this helps retrieval), source metadata
+   (`url`, `title`, `heading`, `tokens`), and a content-hash id (`sha1` of
+   url + heading + leading text). That id is what makes re-ingestion idempotent.
+
+3. **Embed + index — `src/vectorstore.py:index_chunks()`.** Chunks are
+   de-duplicated by id (within the batch and against what's already stored),
+   embedded in batches with fastembed's `passage_embed`, and upserted into a
+   persistent Chroma collection configured for cosine distance. Running with
+   `--keep-index` upserts instead of rebuilding from scratch. The committed
+   `data/chroma/` directory is the output of this step.
+
+### Answering (online): `app.py` → `src/rag.py`
+
+`app.py` is the Streamlit UI; the retrieval and generation logic lives in
+`src/rag.py` so it stays testable and UI-agnostic. For each question:
+
+1. **Input check — `guardrails.check_input()`.** Rejects empty or over-long input
+   before anything is spent, and raises an injection flag if the text matches known
+   jailbreak patterns. The flag doesn't block the answer — it's surfaced in the UI,
+   and the system prompt is what actually resists the injection.
+
+2. **Retrieve — `rag.retrieve()`.** If there's chat history and the question is
+   short or pronoun-heavy (`_needs_rewrite`), `rewrite_followup()` asks Gemini to
+   rewrite it into a standalone query ("how does *it* work?" becomes "how does
+   GitLab's async communication work?"). The query is embedded with fastembed's
+   `query_embed` and run against Chroma via `vectorstore.query()`, which converts
+   cosine distance back into a 0–1 similarity. `guardrails.assess_retrieval()` then
+   checks the best similarity: if it's below `MIN_SIMILARITY` the function returns a
+   refusal and no LLM call is made. Everything is bundled into a `RagResult`.
+
+3. **Generate — `rag.stream_answer()`.** When retrieval is strong enough, the
+   retrieved chunks are formatted into a numbered `SOURCES` block
+   (`prompts.build_user_turn`), combined with the recent chat history and the
+   grounded `SYSTEM_PROMPT`, and streamed from Gemini token by token. Thinking is
+   disabled for `2.5` models so the budget goes to the visible answer. Transient
+   5xx errors are retried with exponential backoff, but only while nothing has been
+   streamed yet, so the UI never sees duplicated text.
+
+4. **Render — back in `app.py`.** The streamed text is accumulated and shown live
+   with a cursor, `linkify_citations()` rewrites each `[n]` marker into a clickable
+   link to that source's URL, and `render_sources()` lists the exact chunks (with
+   similarity scores) in an expander. The turn is saved to `st.session_state` so
+   history survives Streamlit's reruns.
+
+### Data flow at a glance
+
+```
+ingest.py:  SEED_URLS -> crawl() -> [Page] -> chunk_pages() -> [Chunk] -> index_chunks() -> Chroma
+app.py:     question -> check_input() -> retrieve() -- rewrite? -- query() -> assess_retrieval()
+                                                                                 |
+                                       refuse  <-- weak --        -- strong -->  stream_answer() -> Gemini
+                                                                                 |
+                                       linkify_citations() + render_sources()  <-+
+```
+
+## 5. What makes it trustworthy
 
 **Transparency**
 - **Inline citations:** every factual sentence carries a `[n]` marker, rendered as a
@@ -84,7 +168,7 @@ generating the answer, which is the part that actually needs it.
   on the free tier) are retried automatically with exponential backoff before any
   error is shown.
 
-## 5. Measuring it — the eval harness
+## 6. Measuring it
 
 `eval/run_eval.py` runs a gold set (`eval/questions.yaml`) and reports:
 - **Retrieval hit-rate@k** — for on-topic questions, does an expected source page
@@ -106,7 +190,7 @@ The eval also drove a concrete tuning decision: off-topic queries top out around
 (GitLab's handbook is full of engineering content), and the threshold correctly
 refuses it rather than answering an off-topic code request.
 
-## 6. Trade-offs & limitations
+## 7. Trade-offs & limitations
 
 - **Curated, not exhaustive:** tuned for answer precision; some handbook areas
   aren't indexed yet (widen the allowlist to add them).
@@ -121,7 +205,7 @@ refuses it rather than answering an off-topic code request.
   Heavy testing can exhaust it for the day; the app degrades gracefully with a
   clear rate-limit message, and a fresh key or the next-day reset restores it.
 
-## 7. What I'd do next
+## 8. What I'd do next
 
 1. Hybrid retrieval + a cross-encoder re-ranker for higher precision.
 2. LLM-as-judge groundedness scoring in the eval loop (catch unsupported claims, not
