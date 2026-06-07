@@ -26,7 +26,7 @@ def get_api_key() -> str:
 CHAT_MODEL = os.getenv("CHAT_MODEL", "gemini-2.5-flash")
 
 EMBED_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
-EMBED_DIM = 384
+EMBED_DIM = 384 
 EMBED_BATCH_SIZE = int(os.getenv("EMBED_BATCH_SIZE", "256"))  # upsert chunk size
 
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.2"))
@@ -40,14 +40,18 @@ CHUNK_OVERLAP_TOKENS = int(os.getenv("CHUNK_OVERLAP_TOKENS", "100"))
 COLLECTION_NAME = "gitlab_handbook"
 TOP_K = int(os.getenv("TOP_K", "5"))
 MIN_SIMILARITY = float(os.getenv("MIN_SIMILARITY", "0.75"))
-HISTORY_TURNS = int(os.getenv("HISTORY_TURNS", "4"))
+HISTORY_TURNS = int(os.getenv("HISTORY_TURNS", "4")) 
 
 # --- Crawl scope ----------------------------------------------------------
-# Seed from GitLab's Handbook + Direction landing pages, as in the brief.
+# GitLab retired about.gitlab.com/direction/ (it now 301s to /whats-new/).
+# Product *direction/strategy/vision* lives in the handbook under /handbook/product,
+# and the live "what's coming" overview is /whats-new — we use both.
 SEED_URLS = [
-    "https://about.gitlab.com/direction/",
+    "https://about.gitlab.com/whats-new/",
     "https://handbook.gitlab.com/handbook/company/vision/",
     "https://handbook.gitlab.com/handbook/company/mission/",
+    "https://handbook.gitlab.com/handbook/product/product-principles/",
+    "https://handbook.gitlab.com/handbook/product/",
     "https://handbook.gitlab.com/handbook/values/",
     "https://handbook.gitlab.com/handbook/engineering/",
     "https://handbook.gitlab.com/handbook/people-group/",
@@ -57,7 +61,8 @@ SEED_URLS = [
 
 # A page is only crawled/indexed if its URL starts with one of these prefixes.
 ALLOWED_PREFIXES = [
-    "https://about.gitlab.com/direction",
+    "https://about.gitlab.com/whats-new",
+    "https://handbook.gitlab.com/handbook/product",
     "https://handbook.gitlab.com/handbook/values",
     "https://handbook.gitlab.com/handbook/engineering",
     "https://handbook.gitlab.com/handbook/people-group",
