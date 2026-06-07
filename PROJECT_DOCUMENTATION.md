@@ -79,7 +79,10 @@ generating the answer, which is the part that actually needs it.
 
 **Product thinking**
 - Streaming answers, suggested starter questions, live index stats in the sidebar,
-  clear-chat, and friendly handling of rate limits / API errors so the experience degrades gracefully instead of crashing.
+  clear-chat, and friendly handling of rate limits / API errors so the experience
+  degrades gracefully instead of crashing. Transient 5xx/overloaded errors (common
+  on the free tier) are retried automatically with exponential backoff before any
+  error is shown.
 
 ## 5. Measuring it — the eval harness
 

@@ -32,6 +32,10 @@ EMBED_BATCH_SIZE = int(os.getenv("EMBED_BATCH_SIZE", "256"))  # upsert chunk siz
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.2"))
 MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS", "1024"))
 
+# Retry transient (5xx/overloaded) generation errors with exponential backoff.
+MAX_RETRIES = int(os.getenv("MAX_RETRIES", "2"))
+RETRY_BASE_DELAY = float(os.getenv("RETRY_BASE_DELAY", "1.0"))  # seconds; doubles per attempt
+
 # --- Chunking ----------------------------------------------------------------
 CHUNK_TOKENS = int(os.getenv("CHUNK_TOKENS", "650"))
 CHUNK_OVERLAP_TOKENS = int(os.getenv("CHUNK_OVERLAP_TOKENS", "100"))

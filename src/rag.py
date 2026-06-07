@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Iterator
 
@@ -21,10 +22,25 @@ def _genai() -> genai.Client:
 
 
 def _gen_config(**kwargs) -> types.GenerateContentConfig:
-    
+
     if "2.5" in config.CHAT_MODEL:
         kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
     return types.GenerateContentConfig(**kwargs)
+
+
+def _is_transient(exc: Exception) -> bool:
+    """5xx / overloaded errors are worth retrying; quota and bad-request aren't."""
+    msg = str(exc)
+    return "503" in msg or "500" in msg or "ServerError" in type(exc).__name__
+
+
+def _error_reason(exc: Exception) -> str:
+    msg = str(exc)
+    if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
+        return "the Gemini free-tier quota is exhausted for now"
+    if _is_transient(exc):
+        return "the model is briefly overloaded (a transient server error)"
+    return f"an unexpected error occurred ({type(exc).__name__})"
 
 
 @dataclass
@@ -63,16 +79,20 @@ def rewrite_followup(question: str, history: list[dict]) -> str:
         "it. Return only the rewritten question.\n\n"
         f"Chat history:\n{convo}\n\nFollow-up: {question}\n\nStandalone question:"
     )
-    try:
-        resp = _genai().models.generate_content(
-            model=config.CHAT_MODEL,
-            contents=prompt,
-            config=_gen_config(temperature=0.0, max_output_tokens=80),
-        )
-        rewritten = (resp.text or "").strip().strip('"')
-        return rewritten or question
-    except Exception: 
-        return question
+    cfg = _gen_config(temperature=0.0, max_output_tokens=80)
+    for attempt in range(config.MAX_RETRIES + 1):
+        try:
+            resp = _genai().models.generate_content(
+                model=config.CHAT_MODEL, contents=prompt, config=cfg
+            )
+            rewritten = (resp.text or "").strip().strip('"')
+            return rewritten or question
+        except Exception as exc:
+            if not _is_transient(exc) or attempt == config.MAX_RETRIES:
+                # Rewrite is best-effort; fall back to the original question.
+                return question
+            time.sleep(config.RETRY_BASE_DELAY * 2**attempt)
+    return question
 
 
 def retrieve(question: str, history: list[dict] | None = None) -> RagResult:
@@ -125,18 +145,29 @@ def stream_answer(
         temperature=config.TEMPERATURE,
         max_output_tokens=config.MAX_OUTPUT_TOKENS,
     )
-    try:
-        for chunk in _genai().models.generate_content_stream(
-            model=config.CHAT_MODEL, contents=contents, config=cfg
-        ):
-            if chunk.text:
-                yield chunk.text
-    except Exception as exc:  
-        msg = str(exc)
-        if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
-            reason = "the Gemini free-tier quota is exhausted for now"
-        elif "503" in msg or "500" in msg or "ServerError" in type(exc).__name__:
-            reason = "the model is briefly overloaded (a transient server error)"
-        else:
-            reason = f"an unexpected error occurred ({type(exc).__name__})"
-        yield f"\n\n I couldn't finish that answer — {reason}. Please try again in a moment."
+    # Transient 5xx/overloaded errors are common on the free tier and usually clear
+    # on a retry. We only retry while nothing has been streamed yet: once tokens are
+    # out to the UI we can't replay them, so a mid-stream failure surfaces as-is.
+    for attempt in range(config.MAX_RETRIES + 1):
+        produced = False
+        try:
+            for chunk in _genai().models.generate_content_stream(
+                model=config.CHAT_MODEL, contents=contents, config=cfg
+            ):
+                if chunk.text:
+                    produced = True
+                    yield chunk.text
+            return
+        except Exception as exc:
+            retryable = (
+                not produced
+                and _is_transient(exc)
+                and attempt < config.MAX_RETRIES
+            )
+            if not retryable:
+                yield (
+                    f"\n\n I couldn't finish that answer — {_error_reason(exc)}. "
+                    "Please try again in a moment."
+                )
+                return
+            time.sleep(config.RETRY_BASE_DELAY * 2**attempt)
