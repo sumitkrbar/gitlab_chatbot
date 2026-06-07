@@ -39,7 +39,7 @@ CHUNK_OVERLAP_TOKENS = int(os.getenv("CHUNK_OVERLAP_TOKENS", "100"))
 # --- Retrieval ---------------------------------------------------------------
 COLLECTION_NAME = "gitlab_handbook"
 TOP_K = int(os.getenv("TOP_K", "5"))
-MIN_SIMILARITY = float(os.getenv("MIN_SIMILARITY", "0.75"))
+MIN_SIMILARITY = float(os.getenv("MIN_SIMILARITY", "0.70"))
 HISTORY_TURNS = int(os.getenv("HISTORY_TURNS", "4")) 
 
 # --- Crawl scope ----------------------------------------------------------
