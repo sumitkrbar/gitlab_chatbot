@@ -1,0 +1,33 @@
+# `expect_url_contains` is a substring the correct source URL should contain.
+# `off_topic: true` marks questions the bot SHOULD refuse (weak retrieval).
+questions:
+  - q: "What are GitLab's core values?"
+    expect_url_contains: "/handbook/values"
+  - q: "What does CREDIT stand for in GitLab's values?"
+    expect_url_contains: "/handbook/values"
+  - q: "How does GitLab approach iteration?"
+    expect_url_contains: "/handbook/values"
+  - q: "What is GitLab's product direction and strategy?"
+    expect_url_contains: "/handbook/product"
+  - q: "What new features are coming to GitLab?"
+    expect_url_contains: "/whats-new"
+  - q: "How is the engineering organization structured at GitLab?"
+    expect_url_contains: "/handbook/engineering"
+  - q: "What is GitLab's approach to async communication?"
+    expect_url_contains: "/handbook"
+  - q: "How does GitLab handle the people group and team member relations?"
+    expect_url_contains: "/handbook/people-group"
+  - q: "What is GitLab's mission as a company?"
+    expect_url_contains: "/handbook/company"
+  - q: "How does GitLab approach leadership?"
+    expect_url_contains: "/handbook/leadership"
+  - q: "What is GitLab's stance on transparency?"
+    expect_url_contains: "/handbook"
+
+  # Off-topic / out-of-corpus — should be refused, not answered.
+  - q: "What's the weather in Paris today?"
+    off_topic: true
+  - q: "Write me a Python script to sort a list."
+    off_topic: true
+  - q: "Who won the 2018 FIFA World Cup?"
+    off_topic: true
